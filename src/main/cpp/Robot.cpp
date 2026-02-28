@@ -197,7 +197,6 @@ void drive(double vx, double vy, double omega) {
     status_c1.Refresh();
     status_c2.Refresh();
     if (controller_0.GetXButtonPressed() || controller_0.GetYButtonPressed()) {
-      std::cout << "clickityclackity";
       intakeOn = !intakeOn;
     }
 
