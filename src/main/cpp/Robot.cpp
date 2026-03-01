@@ -32,7 +32,7 @@ class Robot : public frc::TimedRobot {
   
   //const double ratio_s = 21.42857142857143;
   //const double ratio_s = 150.0 / 7.0;
-  const double bang = .9;
+
   const double ratio_s = 360;
   // const double ratio_d = 8.14;
   const double ratio_d = std::numbers::pi;
@@ -42,7 +42,7 @@ class Robot : public frc::TimedRobot {
   const double wheel_d = 0.1016;
   const double wheel_c = wheel_d * std::numbers::pi;
   // PID Constants
-  double sP = 0.15;
+  double sP = 0.2;
   double sI = 0;
   double sD = 0;
   double dP = 0.2;
@@ -50,7 +50,7 @@ class Robot : public frc::TimedRobot {
   double dD = 0;
   // Max Speed
   const double max_drive = 4.4196; // m/s
-  const double max_rotate = 710 / (150 / 7); // rad/s
+  const double max_rotate = 710 / 40; // rad/s
   // Kinematics
   frc::Translation2d fl{0.2889_m,  0.2635_m}; //4 
   frc::Translation2d fr{0.2889_m, -0.2635_m}; //3
@@ -79,7 +79,8 @@ class Robot : public frc::TimedRobot {
   frc::Spark launchMotor{1};
 
   // frc::BangBangController launcherBang;
-  frc::PIDController launcherBang{0.5, 0, 0};
+  const double bang = 2.85;
+  frc::PIDController launcherBang{.2, 0, 0.02};
   frc::Encoder encode_l1{0, 1, false, frc::Encoder::EncodingType::k2X};
   // Blue 0
   // Yellow 1
@@ -153,6 +154,7 @@ void drive(double vx, double vy, double omega) {
   frc::Rotation2d current_s3{units::turn_t(status_c3.GetValue().value() / ratio_s)};
   frc::Rotation2d current_s1{units::turn_t(status_c1.GetValue().value() / ratio_s)};
   frc::Rotation2d current_s2{units::turn_t(status_c2.GetValue().value() / ratio_s)};
+
   states[0] = frc::SwerveModuleState::Optimize(states[0], current_s4);
   states[1] = frc::SwerveModuleState::Optimize(states[1], current_s3);
   states[2] = frc::SwerveModuleState::Optimize(states[2], current_s1);
@@ -214,6 +216,7 @@ void drive(double vx, double vy, double omega) {
 
   }
   void TeleopPeriodic() override {
+    
     status_c4.Refresh();
     status_c3.Refresh();
     status_c1.Refresh();
@@ -251,10 +254,10 @@ void drive(double vx, double vy, double omega) {
     }
 
     if (launcherOn) {
-      launcherGoal = (-launcherBang.Calculate(-((encode_l1.GetRate() / 8192) / 20), bang));
+      launcherGoal = (-launcherBang.Calculate(-((encode_l1.GetRate() / 2048) / 100), bang));
       launchMotor.Set(launcherGoal);
-
-      frc::SmartDashboard::PutNumber("getrate", (-((encode_l1.GetRate() / 8192) / 20)));
+      frc::SmartDashboard::PutNumber("getrate", (-((encode_l1.GetRate() / 2048) / 100)));
+    
       frc::SmartDashboard::PutNumber("launcherbang", launcherGoal);
       
     } else {
@@ -300,7 +303,8 @@ void drive(double vx, double vy, double omega) {
   frc::SmartDashboard::PutNumber("Right X", controller_0.GetRightX());
   }
   void RobotPeriodic() override {
-
+  
+      frc::SmartDashboard::PutNumber("rotations,", encode_l1.GetDistance());
   if (encode_s4.GetPosition() > 360) {encode_s4.SetPosition(encode_s4.GetPosition() - 360);}
   if (encode_s3.GetPosition() > 360) {encode_s3.SetPosition(encode_s3.GetPosition() - 360);}
   if (encode_s1.GetPosition() > 360) {encode_s1.SetPosition(encode_s1.GetPosition() - 360);}
