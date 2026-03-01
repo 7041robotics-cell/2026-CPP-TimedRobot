@@ -1,3 +1,6 @@
+// #define __SwerveTest__ 
+
+
 #include <iostream>
 #include <frc/TimedRobot.h>
 #include <frc/smartdashboard/SmartDashboard.h>
@@ -21,9 +24,16 @@
 #include <LimelightHelpers.h>
 #include <cameraserver/CameraServer.h>
 #include <cmath>
+#include <vector>
 
 using namespace units::literals;
-
+struct SwerveStruct {
+  public: 
+  double target_s_output;
+  double target_d_output;
+  double pid_s_target_output;
+  double pid_d_target_output;
+};
 class SwerveModule {
 public:
     rev::spark::SparkFlex motor_s; // Steer Motor
@@ -71,7 +81,7 @@ public:
         if (encode_s.GetPosition() < 0)   encode_s.SetPosition(encode_s.GetPosition() + 360);
     }
     // This is basically the only part that matters
-    void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c) {
+    void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct) {
         status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
         
         frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
@@ -79,11 +89,21 @@ public:
 
         double target_s = (state.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
         double target_d = (state.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
+       
+        double pid_s_target = pid_s.Calculate(status_c.GetValue().value() * ratio_s, target_s); // Takes the current CANCoder rotation and uses it to move to the target rotation
+        motor_s.Set(pid_s_target); 
 
-        motor_s.Set(pid_s.Calculate(status_c.GetValue().value() * ratio_s, target_s)); // Takes the current CANCoder rotation and uses it to move to the target rotation
-        motor_d.Set(pid_d.Calculate(encode_d.GetVelocity(), target_d)); // Takes the current Velocity and uses it to reach the target speed
-    }
-};
+        double pid_d_target = pid_d.Calculate(encode_d.GetVelocity(), target_d); // Takes the current Velocity and uses it to reach the target speed
+        motor_d.Set(pid_d_target);
+        
+        double drive_encoder_velocity = encode_d.GetVelocity();
+        double cancoder_position = status_c.GetValue().value();
+
+        DataStruct.pid_d_target_output = pid_d_target;
+        DataStruct.pid_s_target_output = pid_s_target;
+        DataStruct.target_d_output = target_d;
+        DataStruct.target_s_output = target_s; 
+}};
 // =====================================================================================
 // The Actual Robot stuff is down here
 // =====================================================================================
@@ -126,6 +146,11 @@ class Robot : public frc::TimedRobot {
     frc::SwerveDriveKinematics<4> kinematics{fl, fr, bl, br};
 
     // Initializing the swerve modules in the class
+    SwerveStruct module_4_struct;
+    SwerveStruct module_3_struct;
+    SwerveStruct module_1_struct;
+    SwerveStruct module_2_struct;
+
     SwerveModule module_4{4, sP, sI, sD, dP, dI, dD};
     SwerveModule module_3{3, sP, sI, sD, dP, dI, dD};
     SwerveModule module_1{1, sP, sI, sD, dP, dI, dD};
@@ -165,10 +190,31 @@ class Robot : public frc::TimedRobot {
         auto states = kinematics.ToSwerveModuleStates(speeds); // Giving them to kinematics
         frc::SwerveDriveKinematics<4>::DesaturateWheelSpeeds(&states, units::meters_per_second_t(max_drive));
 
-        module_4.Set(states[0], ratio_s, ratio_d, wheel_c);
-        module_3.Set(states[1], ratio_s, ratio_d, wheel_c);
-        module_1.Set(states[2], ratio_s, ratio_d, wheel_c);
-        module_2.Set(states[3], ratio_s, ratio_d, wheel_c);
+        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct);
+        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct);
+        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct);
+        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct);
+        
+        frc::SmartDashboard::PutNumber("Module 1 Target S", module_1_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("Module 1 Target D", module_1_struct.target_d_output);
+        frc::SmartDashboard::PutNumber("Module 1 PID S",    module_1_struct.pid_s_target_output);
+        frc::SmartDashboard::PutNumber("Module 1 PID D",    module_1_struct.pid_d_target_output);
+
+        frc::SmartDashboard::PutNumber("Module 2 Target S", module_2_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("Module 2 Target D", module_2_struct.target_d_output);
+        frc::SmartDashboard::PutNumber("Module 2 PID S",    module_2_struct.pid_s_target_output);
+        frc::SmartDashboard::PutNumber("Module 2 PID D",    module_2_struct.pid_d_target_output);
+
+        frc::SmartDashboard::PutNumber("Module 3 Target S", module_3_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("Module 3 Target D", module_3_struct.target_d_output);
+        frc::SmartDashboard::PutNumber("Module 3 PID S",    module_3_struct.pid_s_target_output);
+        frc::SmartDashboard::PutNumber("Module 3 PID D",    module_3_struct.pid_d_target_output);
+
+        frc::SmartDashboard::PutNumber("Module 4 Target S", module_4_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("Module 4 Target D", module_4_struct.target_d_output);
+        frc::SmartDashboard::PutNumber("Module 4 PID S",    module_4_struct.pid_s_target_output);
+        frc::SmartDashboard::PutNumber("Module 4 PID D",    module_4_struct.pid_d_target_output);
+
     }
 public:
     Robot() {
@@ -176,11 +222,10 @@ public:
 
     }
     void TeleopInit() override {
-      // Syncs all the Relative Encoders to their CANcoders
-        module_4.SyncEncoderToCancoder(ratio_s);
-        module_3.SyncEncoderToCancoder(ratio_s);
-        module_1.SyncEncoderToCancoder(ratio_s);
-        module_2.SyncEncoderToCancoder(ratio_s);
+      module_4.ResetPIDs();
+      module_3.ResetPIDs();
+      module_1.ResetPIDs();
+      module_2.ResetPIDs();
     }
     void TeleopPeriodic() override {
         drive(
@@ -235,17 +280,49 @@ public:
             module_2.ResetPIDs();
         }
     }
-    void RobotPeriodic() override {
-      // Wraps the Encoders, but again we likely don't need to do this
-        module_4.WrapEncoder();
-        module_3.WrapEncoder();
-        module_1.WrapEncoder();
-        module_2.WrapEncoder();
-    }
+
     void RobotInit() override { // TODO: If this works code auto aiming.
+      // Syncs all the Relative Encoders to their CANcoders
+      module_4.SyncEncoderToCancoder(ratio_s);
+      module_3.SyncEncoderToCancoder(ratio_s);
+      module_1.SyncEncoderToCancoder(ratio_s);
+      module_2.SyncEncoderToCancoder(ratio_s);
+
       cs::HttpCamera limelight{"Limelight","http://limelight.local:5800/stream.mjpg"};
       frc::CameraServer::StartAutomaticCapture(limelight);
+
+      LimelightHelpers::setCameraPose_RobotSpace("",
+        -0.0762,    // Forward offset (meters)
+        0.1143,    // Side offset (meters)
+        0.5334,    // Height offset (meters)
+        0.0,    // Roll (degrees)
+        0.0,   // Pitch (degrees)          
+        0.0     // Yaw (degrees)
+      );
     }
+    
+    void RobotPeriodic() override {
+      // Wraps the Encoders, but again we likely don't need to do this
+      module_4.WrapEncoder();
+      module_3.WrapEncoder();
+      module_1.WrapEncoder();
+      module_2.WrapEncoder();
+    }
+    void AutonomousInit() override {
+      module_4.ResetPIDs();
+      module_3.ResetPIDs();
+      module_1.ResetPIDs();
+      module_2.ResetPIDs();
+    }
+    void AutonomousPeriodic() override {
+      launchMotor.Set(-launcherPID.Calculate(-((encode_l1.GetRate() / 2048) / 100), launchSpeed));
+
+    if (launcherPID.AtSetpoint()){
+      uptakeMotor.Set(-0.6);
+    } else { 
+      uptakeMotor.Set(0);
+    }
+    } 
 private:
 };
 #ifndef RUNNING_FRC_TESTS
