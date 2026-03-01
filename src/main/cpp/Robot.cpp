@@ -16,6 +16,13 @@
 #include <algorithm>
 #include <frc/motorcontrol/Spark.h>
 #include <numbers>
+#include <frc/controller/BangBangController.h>
+#include <frc/Encoder.h>
+#include <LimelightHelpers.h>
+#include <cameraserver/CameraServer.h>
+#include <cscore.h>
+#include <cscore_oo.h>
+
  // Motor is 1 count / revolution, was 409
 using namespace units::literals;
 
@@ -25,22 +32,25 @@ class Robot : public frc::TimedRobot {
   
   //const double ratio_s = 21.42857142857143;
   //const double ratio_s = 150.0 / 7.0;
+  const double bang = .9;
   const double ratio_s = 360;
-  const double ratio_d = 8.14;
+  // const double ratio_d = 8.14;
+  const double ratio_d = std::numbers::pi;
+
   
   // Wheel Size
   const double wheel_d = 0.1016;
   const double wheel_c = wheel_d * std::numbers::pi;
   // PID Constants
-  const double sP = 0.3;
-  const double sI = 0;
-  const double sD = 0.2;
-  const double dP = 0.001;
-  const double dI = 0;
-  const double dD = 0;
+  double sP = 0.15;
+  double sI = 0;
+  double sD = 0;
+  double dP = 0.2;
+  double dI = 0;
+  double dD = 0;
   // Max Speed
-  const double max_drive = 5.05; // m/s
-  const double max_rotate = 12.9; // rad/s
+  const double max_drive = 4.4196; // m/s
+  const double max_rotate = 710 / (150 / 7); // rad/s
   // Kinematics
   frc::Translation2d fl{0.2889_m,  0.2635_m}; //4 
   frc::Translation2d fr{0.2889_m, -0.2635_m}; //3
@@ -50,9 +60,7 @@ class Robot : public frc::TimedRobot {
   frc::SwerveDriveKinematics<4> kinematics{fl, fr, bl, br};
   // Controller
   frc::XboxController controller_0{0};
-
-
-
+  
   // CANCoders
   ctre::phoenix6::hardware::CANcoder cancoder_4{43};
   ctre::phoenix6::hardware::CANcoder cancoder_3{33};
@@ -70,8 +78,17 @@ class Robot : public frc::TimedRobot {
   frc::Spark uptakeMotor{3};
   frc::Spark launchMotor{1};
 
-  bool intakeOn = false;
+  // frc::BangBangController launcherBang;
+  frc::PIDController launcherBang{0.5, 0, 0};
+  frc::Encoder encode_l1{0, 1, false, frc::Encoder::EncodingType::k2X};
+  // Blue 0
+  // Yellow 1
+  // Green 2
+  // White 3
 
+  bool intakeOn = false;
+  bool launcherOn = false;
+  double launcherGoal = 0;
   // Steer Motors + PID
   rev::spark::SparkFlex motor_s4{41, rev::spark::SparkLowLevel::MotorType::kBrushless};
   rev::spark::SparkFlex motor_s3{31, rev::spark::SparkLowLevel::MotorType::kBrushless};
@@ -105,6 +122,10 @@ class Robot : public frc::TimedRobot {
   rev::spark::SparkRelativeEncoder encode_d2 = motor_d2.GetEncoder();
 
 void drive(double vx, double vy, double omega) {
+    status_c4.Refresh();
+    status_c3.Refresh();
+    status_c1.Refresh();
+    status_c2.Refresh();
   if (std::abs(vx) < 0.001 && std::abs(vy) < 0.001 && std::abs(omega) < 0.001) {
     motor_d4.Set(0);
     motor_d3.Set(0);
@@ -128,11 +149,10 @@ void drive(double vx, double vy, double omega) {
   frc::SwerveDriveKinematics<4>::DesaturateWheelSpeeds(
       &states, units::meters_per_second_t(max_drive));
 
-  frc::Rotation2d current_s4{units::turn_t(status_c2.GetValue().value() / ratio_s)};
-  frc::Rotation2d current_s3{units::turn_t(status_c2.GetValue().value() / ratio_s)};
-  frc::Rotation2d current_s1{units::turn_t(status_c2.GetValue().value() / ratio_s)};
+  frc::Rotation2d current_s4{units::turn_t(status_c4.GetValue().value() / ratio_s)};
+  frc::Rotation2d current_s3{units::turn_t(status_c3.GetValue().value() / ratio_s)};
+  frc::Rotation2d current_s1{units::turn_t(status_c1.GetValue().value() / ratio_s)};
   frc::Rotation2d current_s2{units::turn_t(status_c2.GetValue().value() / ratio_s)};
-  
   states[0] = frc::SwerveModuleState::Optimize(states[0], current_s4);
   states[1] = frc::SwerveModuleState::Optimize(states[1], current_s3);
   states[2] = frc::SwerveModuleState::Optimize(states[2], current_s1);
@@ -143,39 +163,41 @@ void drive(double vx, double vy, double omega) {
   double target_s1 = (states[2].angle.Degrees().value() / 360);
   double target_s2 = (states[3].angle.Degrees().value() / 360);
 
+  double target_d4 = (states[0].speed.value() / wheel_c) * ratio_d;
+  double target_d3 = (states[1].speed.value() / wheel_c) * ratio_d;
+  double target_d1 = (states[2].speed.value() / wheel_c) * ratio_d;
+  double target_d2 = (states[3].speed.value() / wheel_c) * ratio_d;
 
-  frc::SmartDashboard::PutNumber("Corner 1 degrees", states[3].angle.Degrees().value());
+  motor_s4.Set(pid_s4.Calculate(status_c4.GetValue().value(), target_s4));
+  motor_s3.Set(pid_s3.Calculate(status_c3.GetValue().value(), target_s3));
+  motor_s1.Set(pid_s1.Calculate(status_c1.GetValue().value(), target_s1));
+  motor_s2.Set(pid_s2.Calculate(status_c2.GetValue().value(), target_s2));
 
-
-  double target_d4 = (states[0].speed.value() / wheel_c) * ratio_d * 60.0;
-  double target_d3 = (states[1].speed.value() / wheel_c) * ratio_d * 60.0;
-  double target_d1 = (states[2].speed.value() / wheel_c) * ratio_d * 60.0;
-  double target_d2 = (states[3].speed.value() / wheel_c) * ratio_d * 60.0;
-
-  
-  motor_s4.Set(std::clamp(pid_s4.Calculate(status_c4.GetValue().value(), target_s4), -1.0, 1.0));
-  motor_s3.Set(std::clamp(pid_s3.Calculate(status_c3.GetValue().value(), target_s3), -1.0, 1.0));
-  motor_s1.Set(std::clamp(pid_s1.Calculate(status_c1.GetValue().value(), target_s1), -1.0, 1.0));
-  motor_s2.Set(std::clamp(pid_s2.Calculate(status_c2.GetValue().value(), target_s2), -1.0, 1.0));
-    
   motor_d4.Set(pid_d4.Calculate(encode_d4.GetVelocity(), target_d4));
   motor_d3.Set(pid_d3.Calculate(encode_d3.GetVelocity(), target_d3));
   motor_d1.Set(pid_d1.Calculate(encode_d1.GetVelocity(), target_d1));
   motor_d2.Set(pid_d2.Calculate(encode_d2.GetVelocity(), target_d2));
 
+  frc::SmartDashboard::PutNumber("drive velocity (2)", encode_d2.GetVelocity());
 
-
- frc::SmartDashboard::PutNumber("Corner 4 pid", std::clamp(pid_s4.Calculate(encode_s4.GetPosition(), target_s4), -1.0, 1.0));
- frc::SmartDashboard::PutNumber("Corner 3 pid", std::clamp(pid_s3.Calculate(encode_s3.GetPosition(), target_s3), -1.0, 1.0));
- frc::SmartDashboard::PutNumber("Corner 1 pid", std::clamp(pid_s1.Calculate(encode_s1.GetPosition(), target_s1), -1.0, 1.0));
- frc::SmartDashboard::PutNumber("Corner 2 pid", std::clamp(pid_s2.Calculate(encode_s2.GetPosition(), target_s2), -1.0, 1.0));
+  frc::SmartDashboard::PutNumber("Corner 3 PID", std::clamp(pid_s4.Calculate(status_c4.GetValue().value(), target_s4), -1.0, 1.0));
+  frc::SmartDashboard::PutNumber("Corner 3 pid", std::clamp(pid_s3.Calculate(status_c3.GetValue().value(), target_s3), -1.0, 1.0));
+  frc::SmartDashboard::PutNumber("Corner 1 pid", std::clamp(pid_s1.Calculate(status_c1.GetValue().value(), target_s1), -1.0, 1.0));
+  frc::SmartDashboard::PutNumber("Corner 2 pid", std::clamp(pid_s2.Calculate(status_c2.GetValue().value(), target_s2), -1.0, 1.0));
+    
+  frc::SmartDashboard::PutNumber("Steer 1 Goal", target_s1);
+  frc::SmartDashboard::PutNumber("Steer 2 Goal", target_s2);
+  frc::SmartDashboard::PutNumber("Steer 3 Goal", target_s3);
+  frc::SmartDashboard::PutNumber("Steer 4 Goal", target_s4);
+    
+  frc::SmartDashboard::PutNumber("Drive 1 Goal", target_d1);
+  frc::SmartDashboard::PutNumber("Drive 2 Goal", target_d2);
+  frc::SmartDashboard::PutNumber("Drive 3 Goal", target_d3);
+  frc::SmartDashboard::PutNumber("Drive 4 Goal", target_d4);
   
-
-  frc::SmartDashboard::PutNumber("Corner 1 Goal", target_s1);
-  frc::SmartDashboard::PutNumber("Corner 2 Goal", target_s2);
-  frc::SmartDashboard::PutNumber("Corner 3 Goal", target_s3);
-  frc::SmartDashboard::PutNumber("Corner 4 Goal", target_s4);
+  frc::SmartDashboard::PutNumber("Drive 4 e", encode_d4.GetVelocity());
 }
+
 
  public:
   
@@ -196,33 +218,75 @@ void drive(double vx, double vy, double omega) {
     status_c3.Refresh();
     status_c1.Refresh();
     status_c2.Refresh();
-    if (controller_0.GetXButtonPressed() || controller_0.GetYButtonPressed()) {
+    if (controller_0.GetXButtonPressed()){
       intakeOn = !intakeOn;
     }
 
     if (intakeOn) {
       intakeMotor.Set(-0.5);
+
     } else {
       intakeMotor.Set(0.0);
+      uptakeMotor.Set(0.0);
     }
 
-  
-    if (controller_0.GetRightBumperButtonPressed()){
+
+    if (controller_0.GetRightBumperButton()){
       uptakeMotor.Set(-0.6);
-      launchMotor.Set(-1);
+
     }
      if (controller_0.GetRightBumperButtonReleased()){
       uptakeMotor.Set(0);
+    }
+    if (controller_0.GetBButton()){
+      uptakeMotor.Set(0.6);
+
+    }
+     if (controller_0.GetBButtonReleased()){
+      uptakeMotor.Set(0);
+      
+    }
+     if (controller_0.GetLeftBumperButtonPressed()){
+      launcherOn = !launcherOn;
+    }
+
+    if (launcherOn) {
+      launcherGoal = (-launcherBang.Calculate(-((encode_l1.GetRate() / 8192) / 20), bang));
+      launchMotor.Set(launcherGoal);
+
+      frc::SmartDashboard::PutNumber("getrate", (-((encode_l1.GetRate() / 8192) / 20)));
+      frc::SmartDashboard::PutNumber("launcherbang", launcherGoal);
+      
+    } else {
       launchMotor.Set(0);
     }
 
 
     if (controller_0.GetAButtonPressed()){
-      ropeMotor.Set(-1);
+      ropeMotor.Set(1);
     }
      if (controller_0.GetAButtonReleased()){
       ropeMotor.Set(0);
     }
+
+    if (controller_0.GetYButton()){
+      intakeMotor.Set(-1);
+    }
+     if (controller_0.GetYButtonReleased()){
+      intakeMotor.Set(0);
+    }
+
+    if (controller_0.GetStartButtonPressed()){
+      pid_s1.Reset();
+      pid_s2.Reset();
+      pid_s3.Reset();
+      pid_s4.Reset();
+      pid_d1.Reset();
+      pid_d2.Reset();
+      pid_d3.Reset();
+      pid_d4.Reset();
+    }
+
     
 
   // Drive Function
@@ -236,7 +300,7 @@ void drive(double vx, double vy, double omega) {
   frc::SmartDashboard::PutNumber("Right X", controller_0.GetRightX());
   }
   void RobotPeriodic() override {
-  
+
   if (encode_s4.GetPosition() > 360) {encode_s4.SetPosition(encode_s4.GetPosition() - 360);}
   if (encode_s3.GetPosition() > 360) {encode_s3.SetPosition(encode_s3.GetPosition() - 360);}
   if (encode_s1.GetPosition() > 360) {encode_s1.SetPosition(encode_s1.GetPosition() - 360);}
@@ -253,6 +317,8 @@ void drive(double vx, double vy, double omega) {
   frc::SmartDashboard::PutNumber("S3 Relative", encode_s3.GetPosition());
   frc::SmartDashboard::PutNumber("S1 Relative", encode_s1.GetPosition());
   frc::SmartDashboard::PutNumber("S2 Relative", encode_s2.GetPosition());
+  
+  frc::SmartDashboard::PutNumber("drive encoder", encode_d3.GetPosition());
   status_c4.Refresh();
   status_c3.Refresh();
   status_c1.Refresh();
@@ -262,6 +328,29 @@ void drive(double vx, double vy, double omega) {
   frc::SmartDashboard::PutNumber("C1 Absolute", status_c1.GetValue().value());
   frc::SmartDashboard::PutNumber("C2 Absolute", status_c2.GetValue().value());
 }
+  void RobotInit() override {
+//   frc::CameraServer::StartAutomaticCapture(
+//     cs::HttpCamerall_camera("limelight", "http://limelight-homer.local:5800/stream.mjpg", cs::HttpCamera::HttpCameraKind::kMJPGStreamer);
+//   )
+//   ll_camera.SetResolution(320, 240);
+//   ll_camera.SetFPS(30);   
+//   cs::CvSink cvSink("vision_sink");
+//   cvSink.SetSource(ll_camera);
+//   cvSink.SetEnabled(true);
+//   cv::Mat frame;
+// std::uint64_t frame_time = cvSink.GrabFrame(frame);
+// if (!frame_time) {
+//     fmt::print("Error grabbing frame: {}\n", cvSink.GetError());
+// } else {
+// }
+// cs::CvSource outputStream = frc::CameraServer::PutVideo("Processed", 320, 240);
+// outputStream.PutFrame(frame);
+  
+    cs::HttpCamera limelight{"Limelight","http://limelight.local:5800/stream.mjpg"};
+    frc::CameraServer::StartAutomaticCapture(limelight);
+  }
+  
+
   Robot() {
     pid_s4.EnableContinuousInput(0, 1);
     pid_s3.EnableContinuousInput(0, 1);
