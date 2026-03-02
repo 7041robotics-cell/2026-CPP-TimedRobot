@@ -121,8 +121,8 @@ public:
 // =====================================================================================
 class Robot : public frc::TimedRobot {
 
-    const double ratio_s = 1; // Relative Motor Counts per Steer Rotation. This is 1 for CANCoder, and 360 with Relative Steering Encoder (I have no idea why)
-    const double ratio_d = std::numbers::pi / 10; // Relative motor counts per Drive rotation (TODO: Check this, cuz this ain't right, no way)
+    const double ratio_s = 1 * 150 / 7; // Relative Motor Counts per Steer Rotation. This is 1 for CANCoder, and 360 with Relative Steering Encoder (I have no idea why)
+    const double ratio_d = (std::numbers::pi / 10) * 8.14; // Relative motor counts per Drive rotation (TODO: Check this, cuz this ain't right, no way)
 
     const double wheel_d = 0.1016; // Wheel Diameter (m)
     const double wheel_c = wheel_d * std::numbers::pi; // Wheel Circumference 
@@ -135,14 +135,14 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.3, sI = 0, sD = 0.03; // Steer PID
+    double sP = 0.3, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
-    const double max_drive = (wheel_c * 6784)/(60*14.5);//4.46; // Max drive speed of the robot (not motor) in (m/s)
-    const double max_rotate =((2 * (std::numbers::pi)) * max_drive) / robot_c; // Max rotate speed of the robot (not motor) in radians/s)
+    const double max_drive = (wheel_c * 6784)/(60*14.5) / 2; //4.46; // Max drive speed of the robot (not motor) in (m/s)
+    const double max_rotate = (((2 * (std::numbers::pi)) * max_drive) / robot_c); // Max rotate speed of the robot (not motor) in radians/s)
     const double launchSpeed = 2.85; // DON'T TOUCH THIS. The math doesn't make sense but it works as is so just DO. NOT. MESS. WITH. IT.
     // All of these are in RPS
-    const double uptakeSpeed = 5;
+    const double uptakeSpeed = -2;
     const double uptakeReverseSpeed = -2;
     const double intakeSpeed = 5; 
     const double intakeReverseSpeed = -2;
