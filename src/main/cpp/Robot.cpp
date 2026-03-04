@@ -91,31 +91,41 @@ public:
         if (encode_s.GetPosition() < 0)   encode_s.SetPosition(encode_s.GetPosition() + 360);
     }
     // This is basically the only part that matters
-    void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct) {
-        status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
-        auto current = units::radian_t(status_c.GetValue().value());
-        //frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
-        auto optimized = frc::SwerveModuleState::Optimize(state, current);
-        optimized.speed *= (optimized.angle - current).Cos();
-        //auto optimized = frc::SwerveModuleState::Optimize(state, current); // Optimizes using the Rotation2d of where it wants to go and where it's at right now
-        double target_s = (optimized.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
-        double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
+    void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct, double kS) {
+      status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
+      auto current = units::radian_t(status_c.GetValue().value());
+      //frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
+      auto optimized = frc::SwerveModuleState::Optimize(state, current);
+      optimized.speed *= (optimized.angle - current).Cos();
+      //auto optimized = frc::SwerveModuleState::Optimize(state, current); // Optimizes using the Rotation2d of where it wants to go and where it's at right now
+      double target_s = (optimized.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
+      double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
        
-        double pid_s_target = pid_s.Calculate(status_c.GetValue().value(), target_s); // Takes the current CANCoder rotation and uses it to move to the target rotation
-        motor_s.Set(pid_s_target); 
+      double pid_s_target = pid_s.Calculate(status_c.GetValue().value(), target_s); // raw PID output for steering
 
-        double pid_d_target = pid_d.Calculate(encode_d.GetVelocity(), target_d); // Takes the current Velocity and uses it to reach the target speed
-        motor_d.Set(pid_d_target);
-        
-        DataStruct.pid_d_target_output = pid_d_target;
-        DataStruct.pid_s_target_output = pid_s_target;
-        DataStruct.target_d_output = target_d;
-        DataStruct.target_s_output = target_s; 
-        DataStruct.drive_encoder_velocity = encode_d.GetVelocity();
-        DataStruct.cancoder_position = status_c.GetValue().value();
+      // Apply static feedforward kS
+      double output_s = pid_s_target;
+      const double maxPercent = 0.8; // limit steering power(so swerve modules don't break)
+      if ((std::abs(output_s) > 0.001)) {
+        output_s += kS * std::copysign(1.0, output_s);
+      }
+      output_s = std::clamp(output_s, -maxPercent, maxPercent);
+
+      motor_s.Set(output_s); 
+
+      double pid_d_target = pid_d.Calculate(encode_d.GetVelocity(), target_d); // Takes the current Velocity and uses it to reach the target speed
+      motor_d.Set(pid_d_target);
+      
+      DataStruct.pid_d_target_output = pid_d_target;
+      DataStruct.pid_s_target_output = output_s;
+      DataStruct.target_d_output = target_d;
+      DataStruct.target_s_output = target_s; 
+      DataStruct.drive_encoder_velocity = encode_d.GetVelocity();
+      DataStruct.cancoder_position = status_c.GetValue().value();
+    }
 
 
-}};
+};
 // =====================================================================================
 // The Actual Robot stuff is down here
 // =====================================================================================
@@ -135,7 +145,7 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.3, sI = 0, sD = 0; // Steer PID
+    double sP = 0.01, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
     const double max_drive = (wheel_c * 6784)/(60*14.5) / 5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
@@ -147,10 +157,10 @@ class Robot : public frc::TimedRobot {
     // All of these are in RPS
     const double uptakeSpeed = -2;
     const double uptakeReverseSpeed = 2;
-    const double intakeSpeed = 5; 
-    const double intakeReverseSpeed = -2;
-    const double intake2Speed = 5;
-    const double intake2ReverseSpeed = -2; 
+    const double intakeSpeed = -5; 
+    const double intakeReverseSpeed = 2;
+    const double intake2Speed = -5;
+    const double intake2ReverseSpeed = 2; 
     // LimeLight Stuff
     double tx = LimelightHelpers::getTX("");  // Horizontal offset from crosshair to target in degrees
     double ty = LimelightHelpers::getTY("");  // Vertical offset from crosshair to target in degrees
@@ -219,10 +229,10 @@ class Robot : public frc::TimedRobot {
         auto states = kinematics.ToSwerveModuleStates(speeds); // Giving them to kinematics
         frc::SwerveDriveKinematics<4>::DesaturateWheelSpeeds(&states, units::meters_per_second_t(max_drive));
 
-        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct);
-        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct);
-        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct);
-        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct);
+        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.20);
+        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.20);
+        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.20);
+        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.2);
     }
 public:
     Robot() {
