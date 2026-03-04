@@ -109,8 +109,15 @@ public:
 
       // Apply static feedforward kS
       const double maxPercent = 0.8; // limit steering power(so swerve modules don't break)
-      if (units::math::abs(error.Degrees()) > units::angle::degree_t(15) ) {
-        pid_s_target += std::copysign(kS, pid_s_target);
+
+      // Convert error to degrees as a double
+      double error_deg = error.Degrees().value(); 
+
+      if (std::abs(error_deg) > 15.0) { 
+          pid_s_target += std::copysign(kS, error_deg);
+          frc::SmartDashboard::PutNumber("testtest", kS);
+      } else {
+          pid_s_target = pid_s.Calculate(status_c.GetValue().value(), target_s);
       }
 
 
@@ -150,7 +157,7 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.1, sI = 0, sD = 0; // Steer PID
+    double sP = 0, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
     const double max_drive = (wheel_c * 6784)/(60*14.5) / 5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
@@ -234,10 +241,10 @@ class Robot : public frc::TimedRobot {
         auto states = kinematics.ToSwerveModuleStates(speeds); // Giving them to kinematics
         frc::SwerveDriveKinematics<4>::DesaturateWheelSpeeds(&states, units::meters_per_second_t(max_drive));
 
-        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.10);
-        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.10);
-        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.10);
-        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.1);
+        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.2);
+        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.2);
+        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.2);
+        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.2);
     }
 public:
     Robot() {
