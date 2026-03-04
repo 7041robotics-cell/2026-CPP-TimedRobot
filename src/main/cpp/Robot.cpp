@@ -330,11 +330,11 @@ public:
       }
 
       // Uptake Forward
-      if (controller_0.GetRightBumperButton())         uptakeMotor.Set(uptakePID.Calculate(((encode_u1.GetRate() / 2048)), uptakeSpeed));
+      if (controller_0.GetRightBumperButton())         uptakeMotor.Set(uptakeSpeed);
       if (controller_0.GetRightBumperButtonReleased())  uptakeMotor.Set(0);
 
       // Uptake Backward
-      if (controller_0.GetBButton())                    uptakeMotor.Set(uptakePID.Calculate(((encode_u1.GetRate() / 2048)), uptakeReverseSpeed));
+      if (controller_0.GetBButton())                    uptakeMotor.Set(uptakeReverseSpeed);
       if (controller_0.GetBButtonReleased())            uptakeMotor.Set(0);
 
       // Launcher Toggles
@@ -430,12 +430,10 @@ public:
     }
     void AutonomousPeriodic() override { // TODO: See if we have to put a delay on the uptake
       launchMotor.Set(-launcherPID.Calculate(-((encode_l1.GetRate() / 2048) / 100), launchSpeed));
-      
-      if (launcherPID.AtSetpoint()){ // Turns on the uptake if the launch motor is at the right place
-        uptakeMotor.Set(-0.6);
-      } else { 
-        uptakeMotor.Set(0);
-      }
+      //frc::Wait(4);
+      intakeMotor.Set(intakePID.Calculate(((encode_i1.GetRate() / 2048)), intakeSpeed));
+      uptakeMotor.Set(uptakeSpeed);
+
     } 
 private:
 };
