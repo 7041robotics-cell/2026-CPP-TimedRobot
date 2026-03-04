@@ -96,20 +96,25 @@ public:
       auto current = units::radian_t(status_c.GetValue().value());
       //frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
       auto optimized = frc::SwerveModuleState::Optimize(state, current);
-      optimized.speed *= (optimized.angle - current).Cos();
+      auto error = optimized.angle - current;
+      optimized.speed *= (error).Cos();
+
+      
+
       //auto optimized = frc::SwerveModuleState::Optimize(state, current); // Optimizes using the Rotation2d of where it wants to go and where it's at right now
       double target_s = (optimized.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
       double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
-       
+      
       double pid_s_target = pid_s.Calculate(status_c.GetValue().value(), target_s); // raw PID output for steering
 
       // Apply static feedforward kS
-      double output_s = pid_s_target;
       const double maxPercent = 0.8; // limit steering power(so swerve modules don't break)
-      if ((std::abs(output_s) > 0.001)) {
-        output_s += kS * std::copysign(1.0, output_s);
+      if (units::math::abs(error.Degrees()) > units::angle::degree_t(15) ) {
+        pid_s_target += std::copysign(kS, pid_s_target);
       }
-      output_s = std::clamp(output_s, -maxPercent, maxPercent);
+
+
+      double output_s = std::clamp(pid_s_target, -maxPercent, maxPercent);
 
       motor_s.Set(output_s); 
 
@@ -145,7 +150,7 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.01, sI = 0, sD = 0; // Steer PID
+    double sP = 0.1, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
     const double max_drive = (wheel_c * 6784)/(60*14.5) / 5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
@@ -229,10 +234,10 @@ class Robot : public frc::TimedRobot {
         auto states = kinematics.ToSwerveModuleStates(speeds); // Giving them to kinematics
         frc::SwerveDriveKinematics<4>::DesaturateWheelSpeeds(&states, units::meters_per_second_t(max_drive));
 
-        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.20);
-        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.20);
-        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.20);
-        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.2);
+        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.10);
+        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.10);
+        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.10);
+        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.1);
     }
 public:
     Robot() {
