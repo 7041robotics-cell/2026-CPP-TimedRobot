@@ -8,7 +8,6 @@
 #include <ctre/phoenix6/CANcoder.hpp>
 #include <rev/SparkFlex.h>
 #include <frc/controller/PIDController.h>
-#include <frc/controller/ProfiledPIDController.h>
 #include <frc/controller/BangBangController.h>
 #include <frc/XboxController.h>
 #include <rev/SparkRelativeEncoder.h>
@@ -23,19 +22,11 @@
 #include <cscore_oo.h>
 #include <networktables/NetworkTableInstance.h>
 #include <LimelightHelpers.h>
+#include <cameraserver/CameraServer.h>
 #include <cmath>
 #include <vector>
 #include <frc/shuffleboard/BuiltInWidgets.h>
 #include <frc/shuffleboard/Shuffleboard.h>
-#include <frc/trajectory/TrapezoidProfile.h>
-#include <units/voltage.h>
-#include <units/acceleration.h>
-#include <units/time.h>
-#include <units/length.h>
-#include <units/velocity.h>
-#include <units/angular_velocity.h>
-#include <units/angular_acceleration.h>
-#include <units/angle.h>
 
 using namespace units::literals;
 // Groups the swerve variables for outputting on Elastic
@@ -51,11 +42,6 @@ struct SwerveStruct {
 };
 class SwerveModule {
 public:
-    static constexpr units::meters_per_second_t max_speed = 2_mps; 
-    static constexpr units::meters_per_second_squared_t max_accel = 1_mps_sq;
-    static constexpr units::degrees_per_second_t max_spin = 1900_deg_per_s;
-    static constexpr units::degrees_per_second_squared_t max_wee = 90_deg_per_s_sq;
-
     rev::spark::SparkFlex motor_s; // Steer Motor
     rev::spark::SparkFlex motor_d; // Drive Motor
     ctre::phoenix6::hardware::CANcoder cancoder; // Cancoder
@@ -65,15 +51,6 @@ public:
     frc::PIDController pid_s; // Steering PID
     frc::PIDController pid_d; // Driving PID
 
-    frc::ProfiledPIDController<units::degree> ppid_s;
-    frc::ProfiledPIDController<units::meter> ppid_d;
-
-    frc::TrapezoidProfile<units::degree>::Constraints trap_pid_s{max_spin, max_wee}; 
-    frc::TrapezoidProfile<units::meters>::Constraints trap_pid_d{max_speed, max_accel};
-    
-
-    static constexpr units::second_t kDt = 20_ms; 
-
     SwerveModule(int corner, double sP, double sI, double sD, double dP, double dI, double dD)
         : motor_s{corner * 10 + 1, rev::spark::SparkLowLevel::MotorType::kBrushless}, // Sets the steer motor to the second number being 2
           motor_d{corner * 10 + 2, rev::spark::SparkLowLevel::MotorType::kBrushless}, // Sets the drive motor to the second number being 2
@@ -82,12 +59,10 @@ public:
           encode_s{motor_s.GetEncoder()}, 
           encode_d{motor_d.GetEncoder()},
           pid_s{sP, sI, sD},
-          pid_d{dP, dI, dD},
-          ppid_s{sP, sI, sD, trap_pid_s, kDt},
-          ppid_d{sP, sI, sD, trap_pid_d, kDt}
+          pid_d{dP, dI, dD}
     { 
-
         pid_s.EnableContinuousInput(0, 1); // 0 - 1 for CANCoders. This basically tells the steer PID "You're a circle, 0 and 1 are the same"
+        
     }
       // Turns off the steer and drive motor for the given module
       void Stop() {
@@ -117,41 +92,11 @@ public:
     }
     // This is basically the only part that matters
     void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct) {
-    status_c.Refresh();
-    auto current = units::radian_t(status_c.GetValue().value());
-
-    auto optimized = frc::SwerveModuleState::Optimize(state, current);
-    optimized.speed *= (optimized.angle - current).Cos();
-
-    double target_s_deg = optimized.angle.Degrees().value(); // degrees
-    double target_d_m = (optimized.speed.value() / wheel_c) * ratio_d; // meters/sec or motor rotations/sec
-
-    // --- PPID calculation ---
-    double ppid_s_target = ppid_s.Calculate(units::degree_t(current.value()), units::degree_t(target_s_deg));
-    double ppid_d_target = ppid_d.Calculate(units::meter_t(encode_d.GetVelocity() * wheel_c / ratio_d), units::meter_t(target_d_m));
-
-    motor_s.Set(ppid_s_target);
-    motor_d.Set(ppid_d_target);
-
-    DataStruct.pid_s_target_output = ppid_s_target;
-    DataStruct.pid_d_target_output = ppid_d_target;
-    DataStruct.target_s_output = target_s_deg / 360.0; // normalize to 0-1
-    DataStruct.target_d_output = target_d_m;
-    DataStruct.drive_encoder_velocity = encode_d.GetVelocity();
-    DataStruct.cancoder_position = status_c.GetValue().value();
-}
-
-
-
-
-    /* That stuff up there is AI Code So like, here's the non AI version
-    void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct) {
         status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
         auto current = units::radian_t(status_c.GetValue().value());
         //frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
         auto optimized = frc::SwerveModuleState::Optimize(state, current);
         optimized.speed *= (optimized.angle - current).Cos();
-        
         //auto optimized = frc::SwerveModuleState::Optimize(state, current); // Optimizes using the Rotation2d of where it wants to go and where it's at right now
         double target_s = (optimized.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
         double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
@@ -168,15 +113,16 @@ public:
         DataStruct.target_s_output = target_s; 
         DataStruct.drive_encoder_velocity = encode_d.GetVelocity();
         DataStruct.cancoder_position = status_c.GetValue().value();
-}*/
-};
+
+
+}};
 // =====================================================================================
 // The Actual Robot stuff is down here
 // =====================================================================================
 class Robot : public frc::TimedRobot {
 
-    const double ratio_s = 150 / 7; // Relative Motor Counts per Steer Rotation. This is 1 for CANCoder, and 360 with Relative Steering Encoder (I have no idea why)
-    const double ratio_d = 8.14; // Relative motor counts per Drive rotation (TODO: Check this, cuz this ain't right, no way)
+    const double ratio_s = 1 * 150 / 7; // Relative Motor Counts per Steer Rotation. This is 1 for CANCoder, and 360 with Relative Steering Encoder (I have no idea why)
+    const double ratio_d = (std::numbers::pi / 10) * 8.14; // Relative motor counts per Drive rotation (TODO: Check this, cuz this ain't right, no way)
 
     const double wheel_d = 0.1016; // Wheel Diameter (m)
     const double wheel_c = wheel_d * std::numbers::pi; // Wheel Circumference 
@@ -189,11 +135,12 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.01, sI = 0, sD = 0; // Steer PID
+    double sP = 0.3, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
-    const double max_drive = (wheel_c * 6784)/(60*14.5) / 2; //4.46; // Max drive speed of the robot (not motor) in (m/s)
+    
+    const double max_drive = (wheel_c * 6784)/(60*14.5) / 5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
     const double max_rotate = (((2 * (std::numbers::pi)) * max_drive) / robot_c); // Max rotate speed of the robot (not motor) in radians/s)
-
+   
 
 
     const double launchSpeed = 2.85; // DON'T TOUCH THIS. The math doesn't make sense but it works as is so just DO. NOT. MESS. WITH. IT.
