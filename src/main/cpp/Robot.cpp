@@ -145,10 +145,10 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.01, sI = 0, sD = 0; // Steer PID
+    double sP = 0.008, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
-    const double max_drive = (wheel_c * 6784)/(60*14.5) / 3; //4.46; // Max drive speed of the robot (not motor) in (m/s)
+    const double max_drive = (wheel_c * 6784)/(60*14.5) / 2; //4.46; // Max drive speed of the robot (not motor) in (m/s)
     const double max_rotate = (((2 * (std::numbers::pi)) * max_drive) / robot_c); // Max rotate speed of the robot (not motor) in radians/s)
    
 
@@ -159,7 +159,7 @@ class Robot : public frc::TimedRobot {
     const double uptakeReverseSpeed = 2;
     const double intakeSpeed = -5; 
     const double intakeReverseSpeed = 2;
-    const double intake2Speed = 5;
+    const double intake2Speed = 3;
     const double intake2ReverseSpeed = -  2; 
     // LimeLight Stuff
     double tx = LimelightHelpers::getTX("");  // Horizontal offset from crosshair to target in degrees
