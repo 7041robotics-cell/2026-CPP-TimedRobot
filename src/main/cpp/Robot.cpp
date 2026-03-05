@@ -93,10 +93,10 @@ public:
     // This is basically the only part that matters
     void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct, double kS) {
       status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
-      auto current = units::degree_t(status_c.GetValue().value());
+      auto current = units::radian_t(status_c.GetValue().value());
       //frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
       auto optimized = frc::SwerveModuleState::Optimize(state, current);
-      //optimized.speed *= units::math::cos((optimized.angle.Degrees() - current));
+      optimized.speed *= (optimized.angle - current).Cos();
       //auto optimized = frc::SwerveModuleState::Optimize(state, current); // Optimizes using the Rotation2d of where it wants to go and where it's at right now
       double target_s = (optimized.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
       double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
@@ -145,10 +145,10 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.003, sI = 0, sD = 0; // Steer PID
+    double sP = 0.01, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
-    const double max_drive = (wheel_c * 6784)/(60*14.5) / 5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
+    const double max_drive = (wheel_c * 6784)/(60*14.5) / 3; //4.46; // Max drive speed of the robot (not motor) in (m/s)
     const double max_rotate = (((2 * (std::numbers::pi)) * max_drive) / robot_c); // Max rotate speed of the robot (not motor) in radians/s)
    
 
@@ -159,8 +159,8 @@ class Robot : public frc::TimedRobot {
     const double uptakeReverseSpeed = 2;
     const double intakeSpeed = -5; 
     const double intakeReverseSpeed = 2;
-    const double intake2Speed = -5;
-    const double intake2ReverseSpeed = 2; 
+    const double intake2Speed = 5;
+    const double intake2ReverseSpeed = -  2; 
     // LimeLight Stuff
     double tx = LimelightHelpers::getTX("");  // Horizontal offset from crosshair to target in degrees
     double ty = LimelightHelpers::getTY("");  // Vertical offset from crosshair to target in degrees
