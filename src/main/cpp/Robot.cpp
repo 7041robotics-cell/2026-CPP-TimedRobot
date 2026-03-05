@@ -39,6 +39,9 @@ struct SwerveStruct {
   double drive_encoder_count;
   double drive_encoder_velocity;
   double cancoder_position;
+  double current;
+  double oa;
+  double error;
 };
 class SwerveModule {
 public:
@@ -90,25 +93,32 @@ public:
         if (encode_s.GetPosition() > 360) encode_s.SetPosition(encode_s.GetPosition() - 360);
         if (encode_s.GetPosition() < 0)   encode_s.SetPosition(encode_s.GetPosition() + 360);
     }
-    // This is basically the only part that matters
+    // Where the kinematics wants to go
     void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct, double kS) {
-      status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
-      auto current = units::radian_t(status_c.GetValue().value());
-      //frc::Rotation2d current{units::turn_t(status_c.GetValue().value())}; // This automatically makes it agnostic to Degrees/Radians/Turns (By making it a Rotation2d)
+      //status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
+      // auto current = units::radian_t(status_c.GetValue().value());
+     
+      frc::Rotation2d current{units::turn_t(status_c.GetValue())}; 
+      DataStruct.current = current.Degrees().value(); 
+      
       auto optimized = frc::SwerveModuleState::Optimize(state, current);
-      optimized.speed *= (optimized.angle - current).Cos();
-      //auto optimized = frc::SwerveModuleState::Optimize(state, current); // Optimizes using the Rotation2d of where it wants to go and where it's at right now
-      double target_s = (optimized.angle.Degrees().value() / 360); // Converts the degrees to turns (0-1) by dividing by 360
+      frc::Rotation2d error = (optimized.angle - current);
+
+      optimized.speed *= (error).Cos();
+
+      DataStruct.error = error.Degrees().value();
+      DataStruct.oa = optimized.angle.Degrees().value() + 180;
+
+      double target_s = ((optimized.angle.Degrees().value() / 360) + .5); // Converts the degrees to turns (0-1) by dividing by 360
+      
       double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
        
       double pid_s_target = pid_s.Calculate(status_c.GetValue().value(), target_s); // raw PID output for steering
-
+      
       // Apply static feedforward kS
       double output_s = pid_s_target;
+
       const double maxPercent = 0.8; // limit steering power(so swerve modules don't break)
-      if ((std::abs(output_s) > 0.001)) {
-        output_s += kS * std::copysign(1.0, output_s);
-      }
       output_s = std::clamp(output_s, -maxPercent, maxPercent);
 
       motor_s.Set(output_s); 
@@ -145,10 +155,10 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.008, sI = 0, sD = 0; // Steer PID
+    double sP = 0.05, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
-    const double max_drive = (wheel_c * 6784)/(60*14.5) / 2; //4.46; // Max drive speed of the robot (not motor) in (m/s)
+    const double max_drive = (wheel_c * 6784)/(60*14.5) / 1.5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
     const double max_rotate = (((2 * (std::numbers::pi)) * max_drive) / robot_c); // Max rotate speed of the robot (not motor) in radians/s)
    
 
@@ -157,9 +167,9 @@ class Robot : public frc::TimedRobot {
     // All of these are in RPS
     const double uptakeSpeed = -2;
     const double uptakeReverseSpeed = 2;
-    const double intakeSpeed = -5; 
+    const double intakeSpeed = -2.4; 
     const double intakeReverseSpeed = 2;
-    const double intake2Speed = 3;
+    const double intake2Speed = 5;
     const double intake2ReverseSpeed = -  2; 
     // LimeLight Stuff
     double tx = LimelightHelpers::getTX("");  // Horizontal offset from crosshair to target in degrees
@@ -347,37 +357,41 @@ public:
       module_2.WrapEncoder();
       module_1.ReadDiagnostics(module_1_struct);
 
-        frc::SmartDashboard::PutNumber("1 Target S", module_1_struct.target_s_output);
-        frc::SmartDashboard::PutNumber("1 Target D", module_1_struct.target_d_output);
-        frc::SmartDashboard::PutNumber("1 PID S",    module_1_struct.pid_s_target_output);
-        frc::SmartDashboard::PutNumber("1 PID D",    module_1_struct.pid_d_target_output);
-        frc::SmartDashboard::PutNumber("1 Drive Encoder", module_1_struct.drive_encoder_count);
-        frc::SmartDashboard::PutNumber("1 Drive Encoder Velocity", module_1_struct.drive_encoder_velocity);
-        frc::SmartDashboard::PutNumber("1 CANCoder Position", module_1_struct.cancoder_position);
+        frc::SmartDashboard::PutNumber("Target S", module_1_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("Target D", module_1_struct.target_d_output);
+        frc::SmartDashboard::PutNumber("PID S",    module_1_struct.pid_s_target_output);
+        frc::SmartDashboard::PutNumber("PID D",    module_1_struct.pid_d_target_output);
+        frc::SmartDashboard::PutNumber("Drive Encoder", module_1_struct.drive_encoder_count);
+        frc::SmartDashboard::PutNumber("Drive Velocity", module_1_struct.drive_encoder_velocity);
+        frc::SmartDashboard::PutNumber("CANCoder Position", module_1_struct.cancoder_position);
+        frc::SmartDashboard::PutNumber("OA", module_1_struct.oa);
+        frc::SmartDashboard::PutNumber("current", module_1_struct.current);
+        frc::SmartDashboard::PutNumber("error", module_1_struct.error);
+        
 
-        frc::SmartDashboard::PutNumber("2 Target S", module_2_struct.target_s_output);
-        frc::SmartDashboard::PutNumber("2 Target D", module_2_struct.target_d_output);
-        frc::SmartDashboard::PutNumber("2 PID S",    module_2_struct.pid_s_target_output);
-        frc::SmartDashboard::PutNumber("2 PID D",    module_2_struct.pid_d_target_output);
-        frc::SmartDashboard::PutNumber("2 Drive Encoder", module_2_struct.drive_encoder_count);
-        frc::SmartDashboard::PutNumber("2 Drive Encoder Velocity", module_2_struct.drive_encoder_velocity);
-        frc::SmartDashboard::PutNumber("2 CANCoder Position", module_2_struct.cancoder_position);
+    //     frc::SmartDashboard::PutNumber("2 Target S", module_2_struct.target_s_output);
+    //     frc::SmartDashboard::PutNumber("2 Target D", module_2_struct.target_d_output);
+    //     frc::SmartDashboard::PutNumber("2 PID S",    module_2_struct.pid_s_target_output);
+    //     frc::SmartDashboard::PutNumber("2 PID D",    module_2_struct.pid_d_target_output);
+    //     frc::SmartDashboard::PutNumber("2 Drive Encoder", module_2_struct.drive_encoder_count);
+    //     frc::SmartDashboard::PutNumber("2 Drive Encoder Velocity", module_2_struct.drive_encoder_velocity);
+    //     frc::SmartDashboard::PutNumber("2 CANCoder Position", module_2_struct.cancoder_position);
 
-        frc::SmartDashboard::PutNumber("3 Target S", module_3_struct.target_s_output);
-        frc::SmartDashboard::PutNumber("3 Target D", module_3_struct.target_d_output);
-        frc::SmartDashboard::PutNumber("3 PID S",    module_3_struct.pid_s_target_output);
-        frc::SmartDashboard::PutNumber("3 PID D",    module_3_struct.pid_d_target_output);
-        frc::SmartDashboard::PutNumber("3 Drive Encoder", module_3_struct.drive_encoder_count);
-        frc::SmartDashboard::PutNumber("3 Drive Encoder Velocity", module_3_struct.drive_encoder_velocity);
-        frc::SmartDashboard::PutNumber("3 CANCoder Position", module_3_struct.cancoder_position);
+    //     frc::SmartDashboard::PutNumber("3 Target S", module_3_struct.target_s_output);
+    //     frc::SmartDashboard::PutNumber("3 Target D", module_3_struct.target_d_output);
+    //     frc::SmartDashboard::PutNumber("3 PID S",    module_3_struct.pid_s_target_output);
+    //     frc::SmartDashboard::PutNumber("3 PID D",    module_3_struct.pid_d_target_output);
+    //     frc::SmartDashboard::PutNumber("3 Drive Encoder", module_3_struct.drive_encoder_count);
+    //     frc::SmartDashboard::PutNumber("3 Drive Encoder Velocity", module_3_struct.drive_encoder_velocity);
+    //     frc::SmartDashboard::PutNumber("3 CANCoder Position", module_3_struct.cancoder_position);
 
-        frc::SmartDashboard::PutNumber("4 Target S", module_4_struct.target_s_output);
-        frc::SmartDashboard::PutNumber("4 Target D", module_4_struct.target_d_output);
-        frc::SmartDashboard::PutNumber("4 PID S",    module_4_struct.pid_s_target_output);
-        frc::SmartDashboard::PutNumber("4 PID D",    module_4_struct.pid_d_target_output);
-        frc::SmartDashboard::PutNumber("4 Drive Encoder", module_4_struct.drive_encoder_count);
-        frc::SmartDashboard::PutNumber("4 Drive Encoder Velocity", module_4_struct.drive_encoder_velocity);
-        frc::SmartDashboard::PutNumber("4 CANCoder Position", module_4_struct.cancoder_position);
+    //     frc::SmartDashboard::PutNumber("4 Target S", module_4_struct.target_s_output);
+    //     frc::SmartDashboard::PutNumber("4 Target D", module_4_struct.target_d_output);
+    //     frc::SmartDashboard::PutNumber("4 PID S",    module_4_struct.pid_s_target_output);
+    //     frc::SmartDashboard::PutNumber("4 PID D",    module_4_struct.pid_d_target_output);
+    //     frc::SmartDashboard::PutNumber("4 Drive Encoder", module_4_struct.drive_encoder_count);
+    //     frc::SmartDashboard::PutNumber("4 Drive Encoder Velocity", module_4_struct.drive_encoder_velocity);
+    //     frc::SmartDashboard::PutNumber("4 CANCoder Position", module_4_struct.cancoder_position);
     }
     void AutonomousInit() override {
       module_4.ResetPIDs();
