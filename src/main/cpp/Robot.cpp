@@ -27,7 +27,7 @@
 #include <vector>
 #include <frc/shuffleboard/BuiltInWidgets.h>
 #include <frc/shuffleboard/Shuffleboard.h>
-
+#include <frc/PowerDistribution.h>
 using namespace units::literals;
 // Groups the swerve variables for outputting on Elastic
 struct SwerveStruct {
@@ -48,7 +48,7 @@ public:
     rev::spark::SparkFlex motor_s; // Steer Motor
     rev::spark::SparkFlex motor_d; // Drive Motor
     ctre::phoenix6::hardware::CANcoder cancoder; // Cancoder
-    ctre::phoenix6::StatusSignal<units::angle::turn_t> status_c; // Cancoder status thing (Allows the code to call a refresh of the data from the CAN bus)
+    //ctre::phoenix6::StatusSignal<units::angle::turn_t> status_c; // Cancoder status thing (Allows the code to call a refresh of the data from the CAN bus)
     rev::spark::SparkRelativeEncoder encode_s; // Relative Steering Encoder in the Spark Flex
     rev::spark::SparkRelativeEncoder encode_d; // Relative Driving Encoder in the Spark Flex
     frc::PIDController pid_s; // Steering PID
@@ -58,7 +58,7 @@ public:
         : motor_s{corner * 10 + 1, rev::spark::SparkLowLevel::MotorType::kBrushless}, // Sets the steer motor to the second number being 2
           motor_d{corner * 10 + 2, rev::spark::SparkLowLevel::MotorType::kBrushless}, // Sets the drive motor to the second number being 2
           cancoder{corner * 10 + 3}, // Sets the CANcoder to the second number being 3
-          status_c{cancoder.GetAbsolutePosition()},
+          //status_c{cancoder.GetAbsolutePosition()},
           encode_s{motor_s.GetEncoder()}, 
           encode_d{motor_d.GetEncoder()},
           pid_s{sP, sI, sD},
@@ -81,12 +81,12 @@ public:
         DataStruct.drive_encoder_count = encode_d.GetPosition();
     }
     void RefreshCancoder() { // Refreshes the cancoder for the... dude do I have to specifify it's for the current module you get the idea
-        status_c.Refresh();
+        // status_c.Refresh(;
 
     } // Syncs the Relative Encoder in the turning Spark to the Absolute in the CANCoder
     void SyncEncoderToCancoder(double ratio_s) {
-        status_c.Refresh();
-        encode_s.SetPosition(status_c.GetValue().value() * ratio_s);
+        // status_c.Refresh();
+        //encode_s.SetPosition(status_c.GetValue().value() * ratio_s);
     }
     // This one is probably completelty irrelevant since we're using CANCoders for steering anyways but I'll just leave it
     void WrapEncoder() { 
@@ -95,16 +95,16 @@ public:
     }
     // Where the kinematics wants to go
     void Set(frc::SwerveModuleState state, double ratio_s, double ratio_d, double wheel_c, SwerveStruct& DataStruct, double kS) {
-      //status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
+      // status_c.Refresh(); // Refresh the status for the CANcoders to make sure they're updated
       // auto current = units::radian_t(status_c.GetValue().value());
      
-      frc::Rotation2d current{units::turn_t(status_c.GetValue())}; 
+      frc::Rotation2d current{units::turn_t(cancoder.GetAbsolutePosition().GetValueAsDouble())};
       DataStruct.current = current.Degrees().value(); 
       
       auto optimized = frc::SwerveModuleState::Optimize(state, current);
       frc::Rotation2d error = (optimized.angle - current);
 
-      optimized.speed *= (error).Cos();
+     optimized.speed *= (error).Cos();
 
       DataStruct.error = error.Degrees().value();
       DataStruct.oa = optimized.angle.Degrees().value() + 180;
@@ -113,12 +113,18 @@ public:
       
       double target_d = (optimized.speed.value() / wheel_c) * ratio_d; // This converts from m/s to rotation speed. Figure out ratio_d and it should work pretty good
        
-      double pid_s_target = pid_s.Calculate(status_c.GetValue().value(), target_s); // raw PID output for steering
+      double pid_s_target = pid_s.Calculate(cancoder.GetAbsolutePosition().GetValueAsDouble(), target_s); // raw PID output for steering
       
-      // Apply static feedforward kS
       double output_s = pid_s_target;
 
       const double maxPercent = 0.8; // limit steering power(so swerve modules don't break)
+      double error_double = error.Degrees().value();
+
+      // if(abs(error_double) > 30){
+      //   output_s = copysign(error_double, kS);
+      // } else{
+      //   output_s = pid_s_target;
+      // }
       output_s = std::clamp(output_s, -maxPercent, maxPercent);
 
       motor_s.Set(output_s); 
@@ -131,7 +137,8 @@ public:
       DataStruct.target_d_output = target_d;
       DataStruct.target_s_output = target_s; 
       DataStruct.drive_encoder_velocity = encode_d.GetVelocity();
-      DataStruct.cancoder_position = status_c.GetValue().value();
+      DataStruct.cancoder_position = cancoder.GetAbsolutePosition().GetValueAsDouble();
+      
     }
 
 
@@ -140,6 +147,8 @@ public:
 // The Actual Robot stuff is down here
 // =====================================================================================
 class Robot : public frc::TimedRobot {
+
+    frc::PowerDistribution power{62, frc::PowerDistribution::ModuleType::kRev};
 
     const double ratio_s = 1 * 150 / 7; // Relative Motor Counts per Steer Rotation. This is 1 for CANCoder, and 360 with Relative Steering Encoder (I have no idea why)
     const double ratio_d = (std::numbers::pi / 10) * 8.14; // Relative motor counts per Drive rotation (TODO: Check this, cuz this ain't right, no way)
@@ -155,7 +164,7 @@ class Robot : public frc::TimedRobot {
     frc::PIDController intakePID{.2, 0, 0.02}; // Intake PID 
     frc::PIDController intake2PID{.2, 0, 0.02}; // Intake 2 PID 
   
-    double sP = 0.05, sI = 0, sD = 0; // Steer PID
+    double sP = 0.2, sI = 0, sD = 0; // Steer PID
     double dP = 0.1, dI = 0, dD = 0; // Drive PID
     
     const double max_drive = (wheel_c * 6784)/(60*14.5) / 1.5; //4.46; // Max drive speed of the robot (not motor) in (m/s)
@@ -215,11 +224,11 @@ class Robot : public frc::TimedRobot {
 
     
     void drive(double vx, double vy, double omega) {
-        // Refreshes the Cancoders
-        module_4.RefreshCancoder();
-        module_3.RefreshCancoder();
-        module_1.RefreshCancoder();
-        module_2.RefreshCancoder();
+        // // Refreshes the Cancoders
+        // module_4.RefreshCancoder();
+        // module_3.RefreshCancoder();
+        // module_1.RefreshCancoder();
+        // module_2.RefreshCancoder();
 
         // If the controller is giving 0, don't move any motors
         if (std::abs(vx) < 0.001 && std::abs(vy) < 0.001 && std::abs(omega) < 0.001) {
@@ -239,10 +248,10 @@ class Robot : public frc::TimedRobot {
         auto states = kinematics.ToSwerveModuleStates(speeds); // Giving them to kinematics
         frc::SwerveDriveKinematics<4>::DesaturateWheelSpeeds(&states, units::meters_per_second_t(max_drive));
 
-        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.20);
-        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.20);
-        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.20);
-        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.2);
+        module_4.Set(states[0], ratio_s, ratio_d, wheel_c, module_4_struct, 0.3);
+        module_3.Set(states[1], ratio_s, ratio_d, wheel_c, module_3_struct, 0.3);
+        module_1.Set(states[2], ratio_s, ratio_d, wheel_c, module_1_struct, 0.3);
+        module_2.Set(states[3], ratio_s, ratio_d, wheel_c, module_2_struct, 0.3);
     }
 public:
     Robot() {
@@ -258,7 +267,10 @@ public:
         frc::ApplyDeadband(controller_0.GetLeftY(),  0.08) * max_drive, // Left Stick | Y Axis (For Translation) 
         frc::ApplyDeadband(controller_0.GetLeftX(),  0.08) * max_drive, // Left Stick | X Axis (For Translation) 
         frc::ApplyDeadband(controller_0.GetRightX(), 0.08) * max_rotate); // Right Stick | X Axis (For Rotation) 
-        
+        // frc::ApplyDeadband(.5,  0.08) * max_drive, // Left Stick | Y Axis (For Translation) 
+        // 0 * max_drive, // Left Stick | X Axis (For Translation) 
+        // (0 * max_rotate)); // Right Stick | X Axis (For Rotation) 
+      
         frc::SmartDashboard::PutNumber("Left X", controller_0.GetLeftX());
         frc::SmartDashboard::PutNumber("Left Y", controller_0.GetLeftY());
         frc::SmartDashboard::PutNumber("Right X", controller_0.GetRightX());
@@ -350,26 +362,26 @@ public:
     
     void RobotPeriodic() override {
 
-      // Wraps the Encoders, but again we likely don't need to do this
-      module_4.WrapEncoder();
-      module_3.WrapEncoder();
-      module_1.WrapEncoder();
-      module_2.WrapEncoder();
+      // // Wraps the Encoders, but again we likely don't need to do this
+      // module_4.WrapEncoder();
+      // module_3.WrapEncoder();
+      // module_1.WrapEncoder();
+      // module_2.WrapEncoder();
       module_1.ReadDiagnostics(module_1_struct);
 
-        frc::SmartDashboard::PutNumber("Target S", module_1_struct.target_s_output);
-        frc::SmartDashboard::PutNumber("Target D", module_1_struct.target_d_output);
-        frc::SmartDashboard::PutNumber("PID S",    module_1_struct.pid_s_target_output);
-        frc::SmartDashboard::PutNumber("PID D",    module_1_struct.pid_d_target_output);
-        frc::SmartDashboard::PutNumber("Drive Encoder", module_1_struct.drive_encoder_count);
-        frc::SmartDashboard::PutNumber("Drive Velocity", module_1_struct.drive_encoder_velocity);
-        frc::SmartDashboard::PutNumber("CANCoder Position", module_1_struct.cancoder_position);
-        frc::SmartDashboard::PutNumber("OA", module_1_struct.oa);
-        frc::SmartDashboard::PutNumber("current", module_1_struct.current);
-        frc::SmartDashboard::PutNumber("error", module_1_struct.error);
-        
+        frc::SmartDashboard::PutNumber("1Target S", module_1_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("1Target D", module_1_struct.target_d_output);
+        frc::SmartDashboard::PutNumber("1PID S",    module_1_struct.pid_s_target_output);
+        frc::SmartDashboard::PutNumber("1PID D",    module_1_struct.pid_d_target_output);
+        frc::SmartDashboard::PutNumber("1Drive Encoder", module_1_struct.drive_encoder_count);
+        frc::SmartDashboard::PutNumber("1Drive Velocity", module_1_struct.drive_encoder_velocity);
+        frc::SmartDashboard::PutNumber("1CANCoder Position", module_1_struct.cancoder_position);
+        frc::SmartDashboard::PutNumber("1OA", module_1_struct.oa);
+        frc::SmartDashboard::PutNumber("1current", module_1_struct.current);
+        frc::SmartDashboard::PutNumber("1error", module_1_struct.error);
+        frc::SmartDashboard::PutNumber("power", power.GetTotalCurrent());
 
-    //     frc::SmartDashboard::PutNumber("2 Target S", module_2_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("2 Target S", module_2_struct.target_s_output);
     //     frc::SmartDashboard::PutNumber("2 Target D", module_2_struct.target_d_output);
     //     frc::SmartDashboard::PutNumber("2 PID S",    module_2_struct.pid_s_target_output);
     //     frc::SmartDashboard::PutNumber("2 PID D",    module_2_struct.pid_d_target_output);
@@ -377,7 +389,7 @@ public:
     //     frc::SmartDashboard::PutNumber("2 Drive Encoder Velocity", module_2_struct.drive_encoder_velocity);
     //     frc::SmartDashboard::PutNumber("2 CANCoder Position", module_2_struct.cancoder_position);
 
-    //     frc::SmartDashboard::PutNumber("3 Target S", module_3_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("3 Target S", module_3_struct.target_s_output);
     //     frc::SmartDashboard::PutNumber("3 Target D", module_3_struct.target_d_output);
     //     frc::SmartDashboard::PutNumber("3 PID S",    module_3_struct.pid_s_target_output);
     //     frc::SmartDashboard::PutNumber("3 PID D",    module_3_struct.pid_d_target_output);
@@ -385,7 +397,7 @@ public:
     //     frc::SmartDashboard::PutNumber("3 Drive Encoder Velocity", module_3_struct.drive_encoder_velocity);
     //     frc::SmartDashboard::PutNumber("3 CANCoder Position", module_3_struct.cancoder_position);
 
-    //     frc::SmartDashboard::PutNumber("4 Target S", module_4_struct.target_s_output);
+        frc::SmartDashboard::PutNumber("4 Target S", module_4_struct.target_s_output);
     //     frc::SmartDashboard::PutNumber("4 Target D", module_4_struct.target_d_output);
     //     frc::SmartDashboard::PutNumber("4 PID S",    module_4_struct.pid_s_target_output);
     //     frc::SmartDashboard::PutNumber("4 PID D",    module_4_struct.pid_d_target_output);
